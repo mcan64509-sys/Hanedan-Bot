@@ -27,6 +27,7 @@ const ENV = {
   CLIENT_ID: process.env.CLIENT_ID,
   GUILD_ID: process.env.GUILD_ID,
   WELCOME_LOG_CHANNEL_ID: process.env.WELCOME_LOG_CHANNEL_ID,
+  EVENT_NOTIFICATION_CHANNEL_ID: process.env.EVENT_NOTIFICATION_CHANNEL_ID,
   YOUTUBE_COOKIES: process.env.YOUTUBE_COOKIES || "",
   BOT_FOOTER: process.env.BOT_FOOTER || "HANEDAN BOT • Created By Lymix",
 };
@@ -36,6 +37,7 @@ const REQUIRED_ENV = [
   "CLIENT_ID",
   "GUILD_ID",
   "WELCOME_LOG_CHANNEL_ID",
+  "EVENT_NOTIFICATION_CHANNEL_ID",
 ];
 
 const missingEnv = REQUIRED_ENV.filter((key) => !ENV[key]);
@@ -43,6 +45,165 @@ const missingEnv = REQUIRED_ENV.filter((key) => !ENV[key]);
 if (missingEnv.length) {
   console.error("❌ Eksik Railway Variables:", missingEnv.join(", "));
   process.exit(1);
+}
+
+// ======================================================
+// HANEDAN ETKİNLİK TAKVİMİ
+// ======================================================
+
+const EVENT_TIMEZONE = "Europe/Istanbul";
+const EVENT_REMINDER_MINUTES = 10;
+
+// getDay(): 0=Pazar, 1=Pazartesi, ... 6=Cumartesi
+const HANEDAN_EVENTS = [
+  // Pazartesi
+  { day: 1, time: "20:50", name: "Karakter Turnuvası", emoji: "⚔️" },
+  { day: 1, time: "22:25", name: "ARENA", emoji: "🏟️" },
+
+  // Salı
+  { day: 2, time: "20:50", name: "Karakter Turnuvası", emoji: "⚔️" },
+  { day: 2, time: "22:25", name: "ARENA", emoji: "🏟️" },
+
+  // Çarşamba
+  { day: 3, time: "20:50", name: "Karakter Turnuvası", emoji: "⚔️" },
+  { day: 3, time: "22:25", name: "3 İmparatorluk", emoji: "👑" },
+
+  // Perşembe
+  { day: 4, time: "20:50", name: "Karakter Turnuvası", emoji: "⚔️" },
+  { day: 4, time: "22:25", name: "ARENA", emoji: "🏟️" },
+
+  // Cuma
+  { day: 5, time: "20:50", name: "Karakter Turnuvası", emoji: "⚔️" },
+  { day: 5, time: "22:25", name: "ARENA", emoji: "🏟️" },
+
+  // Cumartesi
+  { day: 6, time: "22:25", name: "3 İmparatorluk", emoji: "👑" },
+
+  // Pazar
+  { day: 0, time: "22:25", name: "ARENA", emoji: "🏟️" },
+];
+
+const DAY_NAMES_TR = [
+  "Pazar",
+  "Pazartesi",
+  "Salı",
+  "Çarşamba",
+  "Perşembe",
+  "Cuma",
+  "Cumartesi",
+];
+
+const sentEventReminders = new Set();
+
+function getIstanbulNowParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: EVENT_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  const parts = Object.fromEntries(
+    formatter.formatToParts(date)
+      .filter((p) => p.type !== "literal")
+      .map((p) => [p.type, p.value])
+  );
+
+  const weekdayMap = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    day: weekdayMap[parts.weekday],
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
+function subtractMinutesFromTime(hhmm, minutes) {
+  const [h, m] = hhmm.split(":").map(Number);
+  let total = h * 60 + m - minutes;
+  total = ((total % 1440) + 1440) % 1440;
+
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(
+    total % 60
+  ).padStart(2, "0")}`;
+}
+
+async function checkEventReminders() {
+  try {
+    if (!client.isReady()) return;
+
+    const guild = client.guilds.cache.get(ENV.GUILD_ID);
+    if (!guild) return;
+
+    const channel = await fetchChannel(
+      guild,
+      ENV.EVENT_NOTIFICATION_CHANNEL_ID
+    );
+
+    if (!channel || !channel.isTextBased()) return;
+
+    const now = getIstanbulNowParts();
+
+    for (const event of HANEDAN_EVENTS) {
+      const reminderTime = subtractMinutesFromTime(
+        event.time,
+        EVENT_REMINDER_MINUTES
+      );
+
+      if (now.day !== event.day || now.time !== reminderTime) continue;
+
+      const dedupeKey = `${now.date}:${event.day}:${event.time}:${event.name}`;
+      if (sentEventReminders.has(dedupeKey)) continue;
+
+      sentEventReminders.add(dedupeKey);
+
+      const embed = withFooter(
+        new EmbedBuilder()
+          .setColor(0x5865f2)
+          .setTitle(`${event.emoji} ${event.name.toUpperCase()} YAKLAŞIYOR!`)
+          .setDescription(
+            [
+              `⏰ **${event.name} etkinliğine ${EVENT_REMINDER_MINUTES} dakika kaldı!**`,
+              `🕒 **Etkinlik Saati:** ${event.time} (Türkiye Saati)`,
+              `📅 **Gün:** ${DAY_NAMES_TR[event.day]}`,
+              "",
+              "🔥 **Toparlanın!**",
+            ].join("\n")
+          )
+      );
+
+      await channel.send({
+        content: "@everyone",
+        embeds: [embed],
+        allowedMentions: { parse: ["everyone"] },
+      });
+
+      console.log(
+        `📣 Etkinlik bildirimi: ${DAY_NAMES_TR[event.day]} ${event.time} ${event.name}`
+      );
+
+      // Set'in şişmesini önlemek için eski gün kayıtlarını temizle.
+      for (const key of sentEventReminders) {
+        if (!key.startsWith(now.date)) {
+          sentEventReminders.delete(key);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("❌ Etkinlik bildirimi hatası:", error);
+  }
 }
 
 // ======================================================
@@ -240,6 +401,10 @@ const commands = [
     .setDescription("Şu anda çalan şarkıyı gösterir."),
 
   new SlashCommandBuilder()
+    .setName("etkinlikler")
+    .setDescription("HANEDAN haftalık etkinlik programını gösterir."),
+
+  new SlashCommandBuilder()
     .setName("ses")
     .setDescription("Müzik ses seviyesini değiştirir.")
     .addIntegerOption((o) =>
@@ -321,6 +486,47 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   try {
+    if (interaction.commandName === "etkinlikler") {
+      const embed = withFooter(
+        new EmbedBuilder()
+          .setColor(0x5865f2)
+          .setTitle("📅 HANEDAN ETKİNLİK PROGRAMI")
+          .setDescription(
+            [
+              "🇹🇷 **Tüm saatler Türkiye saatidir.**",
+              "",
+              "**Pazartesi**",
+              "⚔️ 20:50 • Karakter Turnuvası",
+              "🏟️ 22:25 • ARENA",
+              "",
+              "**Salı**",
+              "⚔️ 20:50 • Karakter Turnuvası",
+              "🏟️ 22:25 • ARENA",
+              "",
+              "**Çarşamba**",
+              "⚔️ 20:50 • Karakter Turnuvası",
+              "👑 22:25 • 3 İmparatorluk",
+              "",
+              "**Perşembe**",
+              "⚔️ 20:50 • Karakter Turnuvası",
+              "🏟️ 22:25 • ARENA",
+              "",
+              "**Cuma**",
+              "⚔️ 20:50 • Karakter Turnuvası",
+              "🏟️ 22:25 • ARENA",
+              "",
+              "**Cumartesi**",
+              "👑 22:25 • 3 İmparatorluk",
+              "",
+              "**Pazar**",
+              "🏟️ 22:25 • ARENA",
+            ].join("\n")
+          )
+      );
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
     if (interaction.commandName === "çal") {
       const voiceChannel = interaction.member?.voice?.channel;
 
@@ -620,7 +826,11 @@ client.once("clientReady", () => {
   console.log(`🤖 HANEDAN BOT aktif: ${client.user.tag}`);
   console.log("🎵 Müzik sistemi: ONLINE");
   console.log("👋 Gelen / Giden sistemi: ONLINE");
+  console.log("📅 Etkinlik sistemi: ONLINE (Europe/Istanbul)");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  checkEventReminders();
+  setInterval(checkEventReminders, 30_000);
 });
 
 async function start() {
