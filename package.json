@@ -1,0 +1,22 @@
+{
+  "name": "hanedan-bot",
+  "version": "1.0.1",
+  "description": "HANEDAN BOT - Discord music + welcome/leave bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "discord.js": "^14.26.4",
+    "discord-player": "^7.2.0",
+    "@discord-player/extractor": "^7.1.0",
+    "@discordjs/voice": "^0.18.0",
+    "discord-api-types": "0.38.52",
+    "youtube-dl-exec": "^3.1.7",
+    "@snazzah/davey": "^0.1.11",
+    "discord-player-youtubedlp": "^1.0.0"
+  }
+}
